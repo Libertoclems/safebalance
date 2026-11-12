@@ -24,17 +24,16 @@ export function formatNaira(kobo: number): string {
 }
 
 /**
- * Platform fee for one stage, paid by the client on top of the stage amount.
- * Pilot proposal from the spec (to be confirmed once partner costs are known):
- *   under ₦20,000            -> ₦100 flat
- *   ₦20,000 to ₦1,000,000    -> 1.5%
- *   over ₦1,000,000          -> 1.5%, capped at ₦15,000
+ * Platform fee: a straight percentage of every stage, paid by the client on
+ * top of the stage amount, so fee income grows with volume. No minimum, no cap.
+ * Change the rate here; it's used everywhere (deal form, WhatsApp, ledger).
+ * The fee is fixed on each stage when the deal is created, so changing the
+ * rate only affects new deals.
  */
+export const FEE_RATE_PERCENT = 5;
+
 export function stageFee(amountKobo: number): number {
-  if (amountKobo < 20_000 * 100) return 100 * 100;
-  const pct = Math.round((amountKobo * 15) / 1000);
-  if (amountKobo > 1_000_000 * 100) return Math.min(pct, 15_000 * 100);
-  return pct;
+  return Math.round((amountKobo * FEE_RATE_PERCENT) / 100);
 }
 
 /** Share of the fee earned when only part of a stage is paid to the worker. */

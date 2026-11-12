@@ -44,6 +44,17 @@ If npm asks you to approve install scripts, approve `prisma`, `@prisma/client`,
 Sandbox rule: payouts to an account number ending in `000` fail, so failure
 handling can be tested.
 
+## Fees
+
+A straight **5% of every stage**, paid by the client on top of the stage
+amount, with no minimum and no cap, so fee income grows with the money moving
+through the platform. The fee is taken when money is released; if a stage is
+refunded, the fee is refunded too, and in a split only the worker's share is
+charged.
+
+Change the rate in one place: `FEE_RATE_PERCENT` in `src/lib/money.ts`. Each
+stage keeps the fee it was created with, so a new rate applies to new deals only.
+
 ## WhatsApp bot
 
 Workers and clients can do the whole deal in WhatsApp: create a deal, join

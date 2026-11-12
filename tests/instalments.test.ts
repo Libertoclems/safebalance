@@ -44,7 +44,7 @@ describe("paying in parts", () => {
   it("locks each part and lets work start only when fully paid", async () => {
     const { worker, client, stages } = await setup();
     const s = stages[0];
-    const target = N(200_000) + stageFee(N(200_000)); // ₦203,000
+    const target = N(200_000) + stageFee(N(200_000)); // ₦210,000
 
     expect((await pay(s.id, client.id, N(50_000))).outcome).toBe("partial");
     expect(await status(s.id)).toBe("PARTLY_FUNDED");
@@ -52,7 +52,7 @@ describe("paying in parts", () => {
 
     await pay(s.id, client.id, N(100_000));
     const p = await savingProgress(s.id);
-    expect(p).toMatchObject({ saved: N(150_000), remaining: target - N(150_000), percent: 73 });
+    expect(p).toMatchObject({ saved: N(150_000), remaining: target - N(150_000), percent: 71 });
 
     expect((await pay(s.id, client.id, target - N(150_000))).outcome).toBe("funded");
     expect(await status(s.id)).toBe("FUNDED");
@@ -106,7 +106,7 @@ describe("paying in parts", () => {
 describe("plans and reminders", () => {
   it("splits what's left into parts and schedules them", async () => {
     const { client, stages } = await setup();
-    await pay(stages[0].id, client.id, N(3_000)); // ₦200,000 left
+    await pay(stages[0].id, client.id, stageFee(N(200_000))); // ₦200,000 left
     const r = await setPlan(stages[0].id, client.id, 4, "WEEK");
     expect(r.instalment).toBe(N(50_000));
     const p = await savingProgress(stages[0].id);
@@ -175,11 +175,11 @@ describe("over WhatsApp", () => {
     await tap(`planparts:${stages[0].id}:4`);
     await tap(`planevery:${stages[0].id}:4:TWO_WEEKS`);
     const plan = await prisma.instalmentPlan.findUniqueOrThrow({ where: { stageId: stages[0].id } });
-    expect(plan).toMatchObject({ parts: 4, every: "TWO_WEEKS", instalment: N(50_750) });
+    expect(plan).toMatchObject({ parts: 4, every: "TWO_WEEKS", instalment: N(52_500) }); // ₦210,000 / 4
 
     await tap(`sim:${stages[0].id}`); // pays the next part
     expect(await status(stages[0].id)).toBe("PARTLY_FUNDED");
     await tap(`deal:${deal.id}`);
-    expect((await last()).text).toContain("₦50,750 of ₦203,000 saved (25%)");
+    expect((await last()).text).toContain("₦52,500 of ₦210,000 saved (25%)");
   });
 });

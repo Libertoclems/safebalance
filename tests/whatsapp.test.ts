@@ -92,7 +92,7 @@ describe("a full deal over WhatsApp", () => {
     await tap(WORKER, "new");
     await say(WORKER, "Install kitchen cabinets");
     await say(WORKER, "Materials 200k\nInstallation 250,000");
-    expect((await last(WORKER)).text).toContain("Client pays: ₦456,750");
+    expect((await last(WORKER)).text).toContain("Client pays: ₦472,500"); // ₦450,000 + 5%
     await tap(WORKER, "create");
 
     const deal = await prisma.deal.findFirstOrThrow({ include: { stages: { orderBy: { position: "asc" } } } });

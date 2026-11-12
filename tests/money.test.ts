@@ -17,12 +17,13 @@ describe("money", () => {
     expect(formatNaira(0)).toBe("₦0");
   });
 
-  it("charges the pilot fee bands", () => {
-    expect(stageFee(nairaToKobo(15_000))).toBe(nairaToKobo(100)); // flat under ₦20k
-    expect(stageFee(nairaToKobo(20_000))).toBe(nairaToKobo(300)); // 1.5%
-    expect(stageFee(nairaToKobo(250_000))).toBe(nairaToKobo(3_750));
-    expect(stageFee(nairaToKobo(1_000_000))).toBe(nairaToKobo(15_000));
-    expect(stageFee(nairaToKobo(5_000_000))).toBe(nairaToKobo(15_000)); // capped
+  it("charges a straight 5% with no minimum or cap", () => {
+    expect(stageFee(nairaToKobo(500))).toBe(nairaToKobo(25));
+    expect(stageFee(nairaToKobo(15_000))).toBe(nairaToKobo(750));
+    expect(stageFee(nairaToKobo(250_000))).toBe(nairaToKobo(12_500));
+    expect(stageFee(nairaToKobo(5_000_000))).toBe(nairaToKobo(250_000));
+    expect(stageFee(nairaToKobo(20_000_000))).toBe(nairaToKobo(1_000_000));
+    expect(stageFee(nairaToKobo(1_000.01))).toBe(5_000); // ₦50.0005 rounds to ₦50
   });
 
   it("splits the fee by the share paid", () => {
