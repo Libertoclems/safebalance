@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import Link from "next/link";
 import { logoutAction } from "./actions";
+import { Logo } from "@/components/Logo";
 import { getCurrentUser } from "@/lib/auth";
 import { isTestMode } from "@/lib/payments";
 import "./globals.css";
@@ -28,9 +29,8 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         )}
         <header className="border-b border-stone-200 bg-white">
           <nav className="mx-auto flex max-w-3xl items-center gap-4 px-4 py-3">
-            <Link href={user ? "/dashboard" : "/"} className="flex items-center gap-2 font-bold text-brand">
-              <span className="grid h-7 w-7 place-items-center rounded-lg bg-brand text-sm text-white">S</span>
-              SafeBalance
+            <Link href={user ? "/dashboard" : "/"} aria-label="SafeBalance home">
+              <Logo />
             </Link>
             <div className="ml-auto flex items-center gap-3 text-sm">
               {user ? (
