@@ -1,0 +1,300 @@
+// SafeBalance V1 (pilot) data model.
+// Development uses SQLite. For production switch the provider to "postgresql"
+// and the money columns to BigInt (see README, "Moving to production").
+//
+// Money is always stored in kobo (1 naira = 100 kobo) as whole numbers.
+// Status fields are strings because SQLite has no enums; the allowed values
+// are listed next to each field and enforced in src/lib/deals.ts.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                String   @id @default(cuid())
+  phone             String   @unique
+  name              String   @default("")
+  role              String   @default("user") // user | admin
+  idVerified        Boolean  @default(false) // BVN/NIN check passed
+  idType            String? // BVN | NIN
+  bankName          String?
+  bankAccountNumber String?
+  bankAccountName   String?
+  createdAt         DateTime @default(now())
+
+  sessions      Session[]
+  dealsAsWorker Deal[]    @relation("worker")
+  dealsAsClient Deal[]    @relation("client")
+  ratingsGiven  Rating[]  @relation("ratingFrom")
+  ratingsGot    Rating[]  @relation("ratingTo")
+  payouts       Payout[]
+}
+
+model OtpCode {
+  id        String   @id @default(cuid())
+  phone     String
+  codeHash  String
+  expiresAt DateTime
+  attempts  Int      @default(0)
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([phone])
+}
+
+model Session {
+  id        String   @id // sha256 of the cookie token
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
+
+model Deal {
+  id          String    @id @default(cuid())
+  code        String    @unique // short code used in the share link
+  title       String
+  description String    @default("")
+  status      String    @default("AWAITING_CLIENT") // AWAITING_CLIENT | ACTIVE | COMPLETED | CANCELLED
+  reviewHours Int       @default(72)
+  workerId    String
+  worker      User      @relation("worker", fields: [workerId], references: [id])
+  clientId    String?
+  client      User?     @relation("client", fields: [clientId], references: [id])
+  acceptedAt  DateTime?
+  createdAt   DateTime  @default(now())
+
+  stages  Stage[]
+  events  DealEvent[]
+  ratings Rating[]
+}
+
+model Stage {
+  id            String  @id @default(cuid())
+  dealId        String
+  deal          Deal    @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  position      Int
+  title         String
+  amount        Int // kobo, what the worker (or supplier) receives
+  fee           Int // kobo, platform fee paid by the client on top
+  kind          String  @default("WORK") // WORK | MATERIALS
+  supplierName  String?
+  supplierBank  String?
+  supplierAcct  String?
+  isChangeOrder Boolean @default(false)
+  // PENDING_APPROVAL (change order waiting for client) | UNFUNDED |
+  // PARTLY_FUNDED (client is paying in parts; work must not start) | FUNDED |
+  // IN_REVIEW | DISPUTED | RELEASED | REFUNDED | SPLIT | CANCELLED
+  status        String  @default("UNFUNDED")
+
+  paymentRef     String?   @unique // reference tied to the per-stage account number
+  accountNumber  String?
+  accountBank    String?
+  fundedAt       DateTime?
+  submittedAt    DateTime?
+  reviewDeadline DateTime?
+  closedAt       DateTime?
+  createdAt      DateTime  @default(now())
+
+  proofs   Proof[]
+  disputes Dispute[]
+  plan     InstalmentPlan?
+
+  @@unique([dealId, position])
+}
+
+// "Pay small small": a client's plan to build up a stage's locked money in parts.
+// The money is simply locked; it never earns interest or returns.
+model InstalmentPlan {
+  id             String    @id @default(cuid())
+  stageId        String    @unique
+  stage          Stage     @relation(fields: [stageId], references: [id], onDelete: Cascade)
+  parts          Int // how many instalments the client chose
+  instalment     Int // kobo per instalment (the last one may be smaller)
+  every          String // WEEK | TWO_WEEKS | MONTH
+  nextDueAt      DateTime
+  lastReminderAt DateTime?
+  active         Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+}
+
+model Proof {
+  id         String   @id @default(cuid())
+  stageId    String
+  stage      Stage    @relation(fields: [stageId], references: [id], onDelete: Cascade)
+  filePath   String
+  mimeType   String
+  note       String   @default("")
+  lat        Float?
+  lng        Float?
+  capturedAt DateTime @default(now()) // server time of upload
+  createdAt  DateTime @default(now())
+}
+
+model Dispute {
+  id             String    @id @default(cuid())
+  stageId        String
+  stage          Stage     @relation(fields: [stageId], references: [id], onDelete: Cascade)
+  raisedById     String
+  reason         String
+  status         String    @default("OPEN") // OPEN | RESOLVED
+  workerShare    Int? // kobo awarded to the worker
+  resolutionNote String?
+  resolvedById   String?
+  createdAt      DateTime  @default(now())
+  resolvedAt     DateTime?
+
+  // Mediation. The worker gets a window to give their side, then the mediator
+  // suggests a split. Nothing is paid unless both sides accept; otherwise a
+  // human decides.
+  responseDeadline DateTime?
+  // WAITING_RESPONSE | PENDING | RUNNING | READY | NEEDS_HUMAN | FAILED | OFF
+  aiStatus         String    @default("WAITING_RESPONSE")
+  aiSuggestion     String? // JSON, see src/lib/mediator/types.ts
+  aiSource         String? // model id, or "demo"
+  aiError          String?
+  aiAttempts       Int       @default(0)
+  aiAt             DateTime?
+  clientDecision   String? // ACCEPT | REJECT
+  workerDecision   String? // ACCEPT | REJECT
+  escalated        Boolean   @default(false)
+  escalationReason String?
+
+  statements DisputeStatement[]
+}
+
+// Each side's account of what happened, in their own words.
+model DisputeStatement {
+  id        String   @id @default(cuid())
+  disputeId String
+  dispute   Dispute  @relation(fields: [disputeId], references: [id], onDelete: Cascade)
+  userId    String
+  role      String // CLIENT | WORKER
+  text      String
+  createdAt DateTime @default(now())
+}
+
+// Double-entry ledger. Every transaction's entries sum to zero.
+// Sign convention: positive = debit, negative = credit.
+// Accounts:
+//   partner:clearing        money held at the licensed partner (asset)
+//   escrow:stage:<id>       money locked for one stage (liability)
+//   payable:user:<id>       money owed to a user, waiting for payout (liability)
+//   payable:supplier:<id>   money owed to a stage's supplier (liability)
+//   revenue:fees            platform fees earned
+//   suspense                transfers that did not match a stage (needs admin)
+model LedgerTransaction {
+  id        String        @id @default(cuid())
+  reference String        @unique // idempotency key, e.g. "release:<stageId>"
+  kind      String
+  memo      String        @default("")
+  stageId   String?
+  createdAt DateTime      @default(now())
+  entries   LedgerEntry[]
+}
+
+model LedgerEntry {
+  id            String            @id @default(cuid())
+  transactionId String
+  transaction   LedgerTransaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  account       String
+  amount        Int
+
+  @@index([account])
+}
+
+model Payout {
+  id            String   @id @default(cuid())
+  userId        String?
+  user          User?    @relation(fields: [userId], references: [id])
+  stageId       String?
+  payable       String // ledger account paid from
+  recipientName String
+  bankName      String
+  accountNumber String
+  amount        Int
+  status        String   @default("PENDING") // PENDING | SUCCESS | FAILED
+  providerRef   String?
+  createdAt     DateTime @default(now())
+}
+
+model Rating {
+  id        String   @id @default(cuid())
+  dealId    String
+  deal      Deal     @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  fromId    String
+  from      User     @relation("ratingFrom", fields: [fromId], references: [id])
+  toId      String
+  to        User     @relation("ratingTo", fields: [toId], references: [id])
+  stars     Int
+  comment   String   @default("")
+  createdAt DateTime @default(now())
+
+  @@unique([dealId, fromId])
+}
+
+model WebhookEvent {
+  id          String   @id @default(cuid())
+  provider    String
+  eventId     String
+  payload     String
+  processedAt DateTime @default(now())
+
+  @@unique([provider, eventId])
+}
+
+// ---------- WhatsApp ----------
+
+// One row per WhatsApp number talking to the bot: where they are in a flow.
+model WaConversation {
+  phone         String    @id // WhatsApp id, digits only, e.g. 2348031112222
+  state         String    @default("IDLE")
+  data          String    @default("{}") // JSON scratchpad for the current flow
+  lastInboundAt DateTime? // for WhatsApp's 24-hour reply window
+  updatedAt     DateTime  @updatedAt
+}
+
+// Every message in and out, for audit and for the test-mode phone simulator.
+model WaMessage {
+  id          String   @id @default(cuid())
+  phone       String
+  direction   String // IN | OUT
+  waMessageId String?  @unique // WhatsApp's id; repeats of the same incoming message are ignored
+  body        String // JSON: { text, buttons?, image? }
+  createdAt   DateTime @default(now())
+
+  @@index([phone, createdAt])
+}
+
+// Outbox: deal updates waiting to be sent to a user (WhatsApp now, SMS later).
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String
+  dealId    String?
+  text      String
+  buttons   String? // JSON [{ id, title }]
+  status    String    @default("PENDING") // PENDING | SENT | FAILED
+  attempts  Int       @default(0)
+  error     String?
+  createdAt DateTime  @default(now())
+  sentAt    DateTime?
+
+  @@index([status, createdAt])
+}
+
+model DealEvent {
+  id        String   @id @default(cuid())
+  dealId    String
+  deal      Deal     @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  actorId   String?
+  type      String
+  message   String
+  createdAt DateTime @default(now())
+
+  @@index([dealId])
+}
