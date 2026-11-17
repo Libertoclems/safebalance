@@ -1,18 +1,20 @@
-// SafeBalance V1 (pilot) data model.
-// Development uses SQLite. For production switch the provider to "postgresql"
-// and the money columns to BigInt (see README, "Moving to production").
+// SafeBalance V1 (pilot) data model, on Postgres (Neon, via Vercel).
 //
 // Money is always stored in kobo (1 naira = 100 kobo) as whole numbers.
-// Status fields are strings because SQLite has no enums; the allowed values
-// are listed next to each field and enforced in src/lib/deals.ts.
+// Int columns cap a stage at ₦20m (see MAX_STAGE_KOBO); move money columns to
+// BigInt before raising that. Status fields are plain strings; the allowed
+// values are listed next to each field and enforced in src/lib/deals.ts.
 
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  // Pooled connection, used by the app.
+  url       = env("DATABASE_URL")
+  // Direct connection, used for creating and changing tables.
+  directUrl = env("DATABASE_URL_UNPOOLED")
 }
 
 model User {

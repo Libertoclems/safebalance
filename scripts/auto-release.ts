@@ -1,28 +1,12 @@
-// Background worker, every 30 seconds:
-//  - release stages whose review window passed without approval or an issue
-//  - send any queued WhatsApp notifications (e.g. ones that failed earlier)
-// Run with: npm run worker
-import { prisma } from "../src/lib/db";
-import { autoReleaseDue } from "../src/lib/deals";
-import { sendInstalmentReminders } from "../src/lib/instalments";
-import { processDueMediations } from "../src/lib/mediator";
-import { dispatchNotifications } from "../src/lib/whatsapp/notify";
+// Background worker for running on a laptop or your own server (on Vercel the
+// scheduled /api/cron route does this instead). Every 30 seconds it runs the
+// timed jobs in src/lib/jobs.ts. Run with: npm run worker
+import { runScheduledJobs } from "../src/lib/jobs";
 
 async function tick() {
   try {
-    const n = await autoReleaseDue();
-    if (n) console.log(`[auto-release] ${new Date().toISOString()} released ${n} stage(s)`);
-    const m = await processDueMediations();
-    if (m) console.log(`[mediator] ran ${m} mediation(s)`);
-    const r = await sendInstalmentReminders();
-    if (r) console.log(`[instalments] queued ${r} reminder(s)`);
-    // Retry failed notifications up to 5 times within a day.
-    await prisma.notification.updateMany({
-      where: { status: "FAILED", attempts: { lt: 5 }, createdAt: { gt: new Date(Date.now() - 86400_000) } },
-      data: { status: "PENDING" },
-    });
-    const sent = await dispatchNotifications();
-    if (sent) console.log(`[notify] sent ${sent} message(s)`);
+    const r = await runScheduledJobs();
+    if (r.released || r.mediations || r.reminders || r.sent) console.log(`[worker] ${new Date().toISOString()}`, r);
   } catch (e) {
     console.error("[worker] failed", e);
   }

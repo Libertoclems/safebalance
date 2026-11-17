@@ -6,32 +6,19 @@ import { getProvider } from "./payments";
 // A payout is booked in the ledger before the partner is asked to send it;
 // if the partner reports failure, the booking is reversed so it can be retried.
 //
-// The pilot runs as a single server, so an in-process lock per account is
-// enough to stop two payouts racing. With Postgres in production, use a row
-// lock (SELECT ... FOR UPDATE) instead.
-
-const locks = new Map<string, Promise<unknown>>();
-
-async function withLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
-  const prev = locks.get(key) ?? Promise.resolve();
-  const run = prev.then(fn, fn);
-  const tail = run.catch(() => undefined);
-  locks.set(key, tail);
-  try {
-    return await run;
-  } finally {
-    if (locks.get(key) === tail) locks.delete(key);
-  }
-}
+// On Vercel many copies of the app run at once, so two payouts for the same
+// account could race. A Postgres advisory lock, held for the length of the
+// booking transaction, makes them take turns across every copy: the second
+// one then sees a zero balance and pays nothing.
 
 type Recipient = { userId?: string; stageId?: string; name: string; bankName: string; accountNumber: string };
 
 async function payOut(account: string, to: Recipient) {
-  return withLock(account, async () => {
-    const amount = await held(prisma, account);
-    if (amount <= 0) return null;
-
-    const payout = await prisma.$transaction(async (tx) => {
+  {
+    const booked = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${account}))::text`;
+      const amount = await held(tx, account);
+      if (amount <= 0) return null;
       const p = await tx.payout.create({
         data: {
           userId: to.userId, stageId: to.stageId, payable: account, recipientName: to.name,
@@ -50,6 +37,9 @@ async function payOut(account: string, to: Recipient) {
       });
       return p;
     });
+    if (!booked) return null;
+    const payout = booked;
+    const amount = booked.amount;
 
     let result: { status: "SUCCESS" | "PENDING" | "FAILED"; providerRef: string };
     try {
@@ -77,7 +67,7 @@ async function payOut(account: string, to: Recipient) {
       }
     });
     return { ...payout, status: result.status };
-  });
+  }
 }
 
 /** Pay a user everything they are owed, if they have saved bank details. */

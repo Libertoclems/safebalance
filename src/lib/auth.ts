@@ -56,26 +56,59 @@ export async function verifyOtp(phoneInput: string, code: string, name?: string)
   }
   await prisma.otpCode.update({ where: { id: otp.id }, data: { used: true } });
 
-  const admins = (process.env.ADMIN_PHONES ?? "").split(",").map((p) => p.trim()).filter(Boolean);
-  const isAdmin = admins.some((p) => {
-    try { return normalizePhone(p) === phone; } catch { return false; }
-  });
+  const isAdmin = isAdminPhone(phone);
   const user = await prisma.user.upsert({
     where: { phone },
     update: isAdmin ? { role: "admin" } : {},
     create: { phone, name: name?.trim() ?? "", role: isAdmin ? "admin" : "user" },
   });
+  await startSession(user.id);
+  return user;
+}
 
+function isAdminPhone(phone: string) {
+  const admins = (process.env.ADMIN_PHONES ?? "").split(",").map((p) => p.trim()).filter(Boolean);
+  return admins.some((p) => {
+    try { return normalizePhone(p) === phone; } catch { return false; }
+  });
+}
+
+/**
+ * Instant sign-in for testing: phone number and name, no code. Only works in
+ * test mode (sandbox payments) AND with QUICK_LOGIN="on" in .env, so it can
+ * never be active once real money is connected. Admin numbers always need
+ * the code, so nobody can open the admin page this way.
+ */
+export function quickLoginEnabled() {
+  return isTestMode() && process.env.QUICK_LOGIN === "on";
+}
+
+export async function quickLogin(phoneInput: string, name: string) {
+  if (!quickLoginEnabled()) throw new DealError("Quick sign-in is turned off");
+  const phone = normalizePhone(phoneInput);
+  const existing = await prisma.user.findUnique({ where: { phone } });
+  if (isAdminPhone(phone) || existing?.role === "admin") {
+    throw new DealError("This number needs a sign-in code. Use \"Sign in with a code\" below.");
+  }
+  if (!existing && !name.trim()) throw new DealError("Enter your name");
+  const user = existing ?? (await prisma.user.create({ data: { phone, name: name.trim() } }));
+  if (existing && !existing.name && name.trim()) {
+    await prisma.user.update({ where: { id: existing.id }, data: { name: name.trim() } });
+  }
+  await startSession(user.id);
+  return user;
+}
+
+async function startSession(userId: string) {
   const token = crypto.randomBytes(32).toString("base64url");
   await prisma.session.create({
-    data: { id: hash(token), userId: user.id, expiresAt: new Date(Date.now() + SESSION_DAYS * 86400_000) },
+    data: { id: hash(token), userId, expiresAt: new Date(Date.now() + SESSION_DAYS * 86400_000) },
   });
   const jar = await cookies();
   jar.set(SESSION_COOKIE, token, {
     httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production",
     path: "/", maxAge: SESSION_DAYS * 86400,
   });
-  return user;
 }
 
 export async function getCurrentUser() {

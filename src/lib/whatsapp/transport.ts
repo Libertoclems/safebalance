@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { prisma } from "../db";
 
@@ -97,7 +98,9 @@ export async function sendTemplate(to: string, text: string) {
 
 // ---------- incoming media ----------
 
-const TEST_MEDIA_DIR = path.join(process.cwd(), "uploads", "wa-test-media");
+// Temporary folder: writable on Vercel too. The simulator stores and reads a
+// photo within the same request, so it doesn't need to last.
+const TEST_MEDIA_DIR = path.join(os.tmpdir(), "safebalance-wa-test-media");
 
 /** Test mode: keep a simulator upload so the bot can "download" it like Cloud API media. */
 export async function storeTestMedia(data: Buffer) {

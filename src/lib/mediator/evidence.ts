@@ -1,8 +1,6 @@
-import fs from "node:fs/promises";
-import path from "node:path";
 import { prisma } from "../db";
 import { formatNaira } from "../money";
-import { UPLOAD_DIR } from "../uploads";
+import { readStoredFile } from "../storage";
 import type { Evidence } from "./types";
 
 const MAX_IMAGES = 8;
@@ -92,7 +90,7 @@ export async function buildEvidence(disputeId: string): Promise<Evidence> {
       continue;
     }
     try {
-      const data = await fs.readFile(path.join(UPLOAD_DIR, path.basename(p.filePath)));
+      const data = await readStoredFile(p.filePath);
       if (data.length > MAX_IMAGE_BYTES) {
         skipped++;
         continue;

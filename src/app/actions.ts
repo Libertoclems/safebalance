@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { getCurrentUser, logout, requestOtp, requireUser, verifyOtp } from "@/lib/auth";
+import { getCurrentUser, logout, quickLogin, requestOtp, requireUser, verifyOtp } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import {
   acceptDeal, addChangeOrder, approveStage, cancelDeal, createDeal, DealError, fastForwardReview,
@@ -62,6 +62,16 @@ export async function verifyCodeAction(_: FormState, fd: FormData): Promise<Form
     await verifyOtp(str(fd, "phone"), str(fd, "code"), str(fd, "name"));
   });
   if (result?.error) return { ...result, step: "code" };
+  redirect(next.startsWith("/") ? next : "/dashboard");
+}
+
+/** Test mode only: sign in with phone and name, no code. */
+export async function quickLoginAction(_: FormState, fd: FormData): Promise<FormState> {
+  const next = str(fd, "next") || "/dashboard";
+  const result = await attempt(async () => {
+    await quickLogin(str(fd, "phone"), str(fd, "name"));
+  });
+  if (result?.error) return result;
   redirect(next.startsWith("/") ? next : "/dashboard");
 }
 

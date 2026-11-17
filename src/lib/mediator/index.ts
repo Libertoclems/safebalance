@@ -1,3 +1,4 @@
+import { after } from "next/server";
 import { prisma } from "../db";
 import { DealError, logDealEvent, resolveDispute } from "../deals";
 import { formatNaira, proRataFee } from "../money";
@@ -199,12 +200,22 @@ export async function runMediation(disputeId: string) {
 
 const inFlight = new Set<Promise<unknown>>();
 
-/** Start mediation in the background (don't make the person wait for it). */
+/**
+ * Start mediation in the background (don't make the person wait for it).
+ * On Vercel, work left running after a response can be cut off, so it's
+ * handed to Next.js `after()`, which keeps the function alive until it ends.
+ * Outside a request (tests, the worker) it just runs.
+ */
 export function kickMediation(disputeId: string) {
   const p = runMediation(disputeId)
     .catch((e) => console.error("[mediator]", e))
     .finally(() => inFlight.delete(p));
   inFlight.add(p);
+  try {
+    after(() => p);
+  } catch {
+    // Not inside a request: nothing to keep alive.
+  }
 }
 
 /** Tests: wait for background mediation runs to finish. */

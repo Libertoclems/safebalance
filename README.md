@@ -11,17 +11,53 @@ BVN/NIN checks are simulated until a licensed partner is connected.
 
 Needs Node.js 20 or newer.
 
+The app uses a Postgres database (Neon, created from the Vercel project's
+Storage tab). Put its two connection lines, `DATABASE_URL` and
+`DATABASE_URL_UNPOOLED`, in `.env`.
+
 ```bash
 npm install
-cp .env.example .env      # then change the secrets in .env
-npm run db:setup          # creates the local database
+cp .env.example .env      # then add the database lines and change the secrets
+npm run db:setup          # creates the tables
 npm run dev               # http://localhost:3000
 npm run worker            # in a second terminal: auto-release + notifications
 npm test                  # 50 tests: money, instalments, WhatsApp, mediator
 ```
 
+One database, three separate areas (Postgres schemas), so nothing mixes:
+
+| Area | Used by | Set by |
+|---|---|---|
+| `public` | the live site on Vercel | Vercel's own database settings |
+| `dev` | the app on your laptop | `?schema=dev` on both lines in `.env` |
+| `test` | `npm test`, which empties it freely | `vitest.config.ts`, automatically |
+
+Tests run against the online database, so from far away (e.g. Nigeria to
+Frankfurt) a full run takes 15–20 minutes. On Vercel the app sits next to the
+database and is fast.
+
 If npm asks you to approve install scripts, approve `prisma`, `@prisma/client`,
 `@prisma/engines` and `esbuild` (`npm install-scripts approve <name>`).
+
+## On Vercel
+
+The test version runs at https://safebalance-six.vercel.app.
+
+- **Database:** Neon Postgres, connected from the project's Storage tab
+  (Frankfurt, with the Functions region also set to Frankfurt).
+- **Proof photos:** a private Vercel Blob store, connected from the Storage
+  tab. Without it (e.g. on a laptop), photos go to `uploads/`. Uploads are
+  capped at 4 MB on Vercel, because Vercel limits request size.
+- **Timed jobs:** `vercel.json` runs `/api/cron` once a day (8am Lagos time;
+  the free plan allows one run a day). It auto-releases stages, starts
+  mediation after the 48-hour window, sends instalment reminders and retries
+  failed messages. In test mode, the "skip the timer" buttons do this at once.
+- **Settings** (Project → Settings → Environment Variables): `PAYMENT_PROVIDER`,
+  `APP_URL`, `QUICK_LOGIN`, `WHATSAPP_MODE`, `MEDIATOR_MODE`, `ADMIN_PHONES`,
+  and long random `AUTH_SECRET`, `SANDBOX_WEBHOOK_SECRET` and `CRON_SECRET`.
+- **Tables:** after changing `prisma/schema.prisma`, run `npm run db:setup`
+  once with the live connection lines (without `?schema=dev`) to update the
+  live tables, then again with them to update `dev`.
 
 ## Try a full deal
 
@@ -202,17 +238,21 @@ Key safety rules:
 - [ ] **Lawyer sign-off** on the partner model, terms and mediation clause.
 - [ ] **SMS** for one-time codes (send it in `requestOtp` in `src/lib/auth.ts`).
 - [ ] **Real BVN/NIN checks** through an identity provider (`verifyIdAction`).
-- [ ] **Postgres**: switch the provider in `prisma/schema.prisma`, change money
-      columns to `BigInt` (the pilot caps a stage at ₦20,000,000), and use row
-      locks for payouts instead of the in-process lock.
-- [ ] **File storage**: move proof uploads from `uploads/` to object storage.
-- [ ] **Hosting**: run the web app and `npm run worker` (or a cron calling
-      `autoReleaseDue`) on a server; set `APP_URL` and long random secrets.
+- [x] **Postgres** (Neon), with payouts guarded by a database lock.
+- [ ] **Bigger stages:** change money columns to `BigInt` before allowing
+      stages over ₦20,000,000.
+- [x] **File storage:** private Vercel Blob.
+- [x] **Hosting:** Vercel, with a daily scheduled job.
+- [ ] **Turn off test-only features:** `QUICK_LOGIN`, the WhatsApp simulator
+      and the "simulate" buttons switch off automatically once a real payment
+      provider is set, but check them before launch.
+- [ ] **More frequent timed jobs:** on Vercel's paid plan, run `/api/cron`
+      every few minutes instead of daily.
 - [ ] Tools for refunding or applying unmatched transfers.
 
-Not in this version (planned for V2 in the spec): voice-note
-agreements, AI dispute mediator, warranty hold-back, "pay small small",
-retainers, USSD, and the Expo mobile app.
+Not in this version (planned for V2 in the spec): voice-note agreements,
+warranty hold-back, retainers, USSD, construction features, and the Expo
+mobile app.
 
 
 
