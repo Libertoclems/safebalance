@@ -80,7 +80,9 @@ function isAdminPhone(phone: string) {
  * the code, so nobody can open the admin page this way.
  */
 export function quickLoginEnabled() {
-  return isTestMode() && process.env.QUICK_LOGIN === "on";
+  // Forgiving about how it's typed in a hosting dashboard: on, "on", ON, true, yes, 1.
+  const value = (process.env.QUICK_LOGIN ?? "").trim().replace(/^["']|["']$/g, "").toLowerCase();
+  return isTestMode() && ["on", "true", "yes", "1"].includes(value);
 }
 
 export async function quickLogin(phoneInput: string, name: string) {
